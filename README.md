@@ -1,25 +1,29 @@
-# BW2-Duo
+# BW2-Duo — Live-Tracker (Duo-Soullink)
 
-Live-Tracker-Webseite für einen **Duo-Soullink** in Pokémon Schwarz 2 — abgeleitet
-aus dem Trio-Tracker ([BW2-Tracker](https://github.com/Fayde420/BW2-Tracker)),
-reduziert auf **zwei Spieler**.
+Live-Anzeige eines **2-Spieler-Soullinks** in Pokémon Schwarz 2: Teams, PC-Box,
+aktueller Gegner (folgt automatisch dem Kampf), Routen und Orden — direkt aus
+dem laufenden Spiel.
 
-Live (nach Pages-Aktivierung): https://fayde420.github.io/BW2-Duo/
+**Live:** https://fayde420.github.io/BW2-Duo/
 
-## Einrichtung (noch offen)
+## Mitspielen — Tracker einrichten
+Du brauchst: **BizHawk** (melonDS-Core), dein **BW2-ROM**, **Python 3**.
 
-Die Seite läuft erst, wenn eine eigene Firebase-Realtime-DB hinterlegt ist:
+1. Den Ordner **`tracker/`** herunterladen.
+2. In der CMD einmalig den Ordner festlegen (Pfad anpassen), dann BizHawk neu starten:
+   ```cmd
+   setx AUTOTRACKER_DIR "C:\Pfad\zum\tracker"
+   ```
+3. BizHawk → ROM laden → **Tools → Lua Console** → `live_team.lua` laden
+   (Konsole zeigt `state.json → <dein Ordner>`).
+4. Bridge starten — jeder Spieler hat einen festen Slot:
+   - **Spieler 1:** `start_duo_p1.bat`  (= `python bridge_duo.py --player p1`)
+   - **Spieler 2:** `start_duo_p2.bat`  (= `--player p2`)
+5. Diese Seite öffnen → oben auf den **Spielernamen klicken** und den echten
+   Namen eintragen. Die Namen sind **pro Run frei wählbar**.
 
-1. **Firebase-Projekt** anlegen → Realtime Database erstellen.
-2. In `index.html` den Block `const firebaseConfig = { … }` ausfüllen
-   (alle `TODO_DUO_*`-Platzhalter ersetzen).
-3. **Spieler anpassen** (drei Stellen, gleiche `slot`-Keys verwenden):
-   - `const PLAYERS = ['p1','p2'];`
-   - `const PLAYER_LABELS = { p1:'Spieler 1', p2:'Spieler 2' };`
-   - `const LIVE_PLAYERS = [ { slot:'p1', … }, { slot:'p2', … } ];`
-4. **Bridge:** Jeder Spieler startet `bridge_trio.py --player <slot>` (z.B. `p1`).
-   Hinweis: In `bridge_trio.py` muss `VALID_PLAYERS` die gewählten Slots
-   enthalten.
+Fertig — die Daten erscheinen live.
 
-Der RAM-Tracker (`live_team.lua`) + die Bridge liegen unverändert im
-[BW2-Tracker](https://github.com/Fayde420/BW2-Tracker)-Repo.
+## Hinweise
+- Die Firebase-DB ist offen (kein Login) — teile die URL nicht breit.
+- BW2-ROM & BizHawk sind nicht enthalten (besorgst du selbst).
