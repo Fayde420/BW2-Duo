@@ -1023,18 +1023,15 @@ window.addEventListener('load', () => {
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
 <script>
-// ─────────────────────────────────────────────
-// TODO: Eigene Duo-Firebase-DB eintragen (Firebase-Konsole -> Projekt
-// anlegen -> Realtime Database). Bis dahin laedt die Seite nicht.
-// ─────────────────────────────────────────────
+// Duo-Firebase (Projekt bw2-duo, Realtime DB europe-west1).
 const firebaseConfig = {
-  apiKey: "TODO_DUO_API_KEY",
-  authDomain: "TODO_DUO_PROJECT.firebaseapp.com",
-  databaseURL: "https://TODO_DUO_PROJECT-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "TODO_DUO_PROJECT",
-  storageBucket: "TODO_DUO_PROJECT.firebasestorage.app",
-  messagingSenderId: "TODO_DUO_SENDER_ID",
-  appId: "TODO_DUO_APP_ID"
+  apiKey: "AIzaSyD7taVvPbBvk-E-nTWeyEvZelmv1TcnzTc",
+  authDomain: "bw2-duo.firebaseapp.com",
+  databaseURL: "https://bw2-duo-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "bw2-duo",
+  storageBucket: "bw2-duo.firebasestorage.app",
+  messagingSenderId: "134210605067",
+  appId: "1:134210605067:web:cfc953617c238954d7f70e"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
