@@ -752,14 +752,14 @@ window.addEventListener('load', () => {
   <p id="run-subtitle">Pokémon Schwarz 2 &nbsp;·&nbsp; Spieler 1 · Spieler 2</p>
   <div style="position:absolute;right:24px;top:50%;transform:translateY(-50%);display:flex;gap:20px;align-items:center;">
     <div style="text-align:center;">
-      <div style="font-size:9px;font-family:'Press Start 2P',monospace;color:#4fc3f7;letter-spacing:1px;margin-bottom:4px;">Spieler 1</div>
+      <div id="hdr-label-p1" onclick="renamePlayer('p1')" title="Klick zum Umbenennen" style="font-size:9px;font-family:'Press Start 2P',monospace;color:#4fc3f7;letter-spacing:1px;margin-bottom:4px;cursor:pointer;">Spieler 1</div>
       <div style="display:flex;align-items:center;gap:5px;">
         <span style="font-size:13px;">💀</span>
         <span id="header-count-p1" style="font-family:'Press Start 2P',monospace;font-size:16px;color:#4fc3f7;text-shadow:0 0 10px rgba(79,195,247,0.4);">0</span>
       </div>
     </div>
     <div style="text-align:center;">
-      <div style="font-size:9px;font-family:'Press Start 2P',monospace;color:#f06292;letter-spacing:1px;margin-bottom:4px;">Spieler 2</div>
+      <div id="hdr-label-p2" onclick="renamePlayer('p2')" title="Klick zum Umbenennen" style="font-size:9px;font-family:'Press Start 2P',monospace;color:#f06292;letter-spacing:1px;margin-bottom:4px;cursor:pointer;">Spieler 2</div>
       <div style="display:flex;align-items:center;gap:5px;">
         <span style="font-size:13px;">💀</span>
         <span id="header-count-p2" style="font-family:'Press Start 2P',monospace;font-size:16px;color:#f06292;text-shadow:0 0 10px rgba(240,98,146,0.4);">0</span>
@@ -845,8 +845,8 @@ window.addEventListener('load', () => {
       <thead>
         <tr>
           <th>Route / Ort</th>
-          <th>Spieler 1</th>
-          <th>Spieler 2</th>
+          <th id="th-p1">Spieler 1</th>
+          <th id="th-p2">Spieler 2</th>
           <th>Status</th>
           <th>Notiz</th>
         </tr>
@@ -890,9 +890,9 @@ window.addEventListener('load', () => {
     <div style="display:flex;justify-content:center;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
       <button class="pi-subtab active" data-mode="search" onclick="showPiMode('search')"
         style="background:var(--accent);border:1px solid var(--accent);color:var(--bg);padding:6px 12px;border-radius:4px;cursor:pointer;font-family:'Exo 2',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.5px;transition:all 0.2s;">🔍 Suche</button>
-      <button class="pi-subtab" data-mode="enemy_p1" onclick="showPiMode('enemy_p1')"
+      <button id="subtab-p1" class="pi-subtab" data-mode="enemy_p1" onclick="showPiMode('enemy_p1')"
         style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:4px;cursor:pointer;font-family:'Exo 2',sans-serif;font-size:12px;font-weight:600;letter-spacing:0.5px;transition:all 0.2s;">⚔ Spieler 1</button>
-      <button class="pi-subtab" data-mode="enemy_p2" onclick="showPiMode('enemy_p2')"
+      <button id="subtab-p2" class="pi-subtab" data-mode="enemy_p2" onclick="showPiMode('enemy_p2')"
         style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:4px;cursor:pointer;font-family:'Exo 2',sans-serif;font-size:12px;font-weight:600;letter-spacing:0.5px;transition:all 0.2s;">⚔ Spieler 2</button>
     </div>
     <!-- Custom Bild (klickbar für Vollbild) -->
@@ -1089,7 +1089,7 @@ function subscribeToRun() {
       const runs = snap.val() || {};
       const run = runs[currentRunId];
       const subtitle = document.getElementById('run-subtitle');
-      if (subtitle) subtitle.textContent = run ? run.name : 'Pokémon Schwarz 2 · Spieler 1 · Spieler 2';
+      if (subtitle) subtitle.textContent = run ? run.name : ('Pokémon Schwarz 2 · ' + getPlayers().map(p => p.label).join(' · '));
     });
     render();
     document.getElementById('loading-overlay').style.display = 'none';
@@ -1260,6 +1260,7 @@ function isUserInteracting() {
 }
 
 function render() {
+  applyPlayerLabels();
   // (alte renderLinks entfällt — Links-Tab wird jetzt von renderLive() befüllt)
   renderEncounters();
   renderRoutes();
@@ -1287,10 +1288,40 @@ function render() {
 // Duo: zwei Spieler. slot = interner Key + Bridge --player Name + DB-Knoten
 // autoTeam_<slot>. Label/Color frei. WICHTIG: PLAYERS/PLAYER_LABELS (oben)
 // muss dieselben Slots haben.
-const LIVE_PLAYERS = [
-  { slot:'p1', label:'Spieler 1', color:'#4fc3f7' },
-  { slot:'p2', label:'Spieler 2', color:'#f06292' },
-];
+// Feste Slots p1/p2 (= Bridge --player + DB-Knoten autoTeam_<slot>).
+// Anzeigenamen kommen PRO RUN aus data.players (Fallback = Standard) und sind
+// per Klick umbenennbar -> jeder Run kann andere Spieler haben.
+const PLAYER_DEFAULTS = {
+  p1: { label: 'Spieler 1', color: '#4fc3f7' },
+  p2: { label: 'Spieler 2', color: '#f06292' },
+};
+function getPlayers() {
+  const cfg = (typeof data !== 'undefined' && data && data.players) || {};
+  return PLAYERS.map(slot => ({
+    slot,
+    label: (cfg[slot] && cfg[slot].label) || PLAYER_DEFAULTS[slot].label,
+    color: (cfg[slot] && cfg[slot].color) || PLAYER_DEFAULTS[slot].color,
+  }));
+}
+function renamePlayer(slot) {
+  const cur = getPlayers().find(p => p.slot === slot);
+  const name = prompt('Name für ' + (cur ? cur.label : slot) + ':', cur ? cur.label : '');
+  if (name === null) return;
+  const t = name.trim();
+  if (!t) return;
+  const players = Object.assign({}, (typeof data !== 'undefined' && data && data.players) || {});
+  players[slot] = Object.assign({}, players[slot] || {}, { label: t });
+  if (typeof data !== 'undefined' && data) data.players = players;
+  db.ref(currentRunId).update({ players }).catch(() => {});
+  render();
+}
+function applyPlayerLabels() {
+  getPlayers().forEach(p => {
+    const h = document.getElementById('hdr-label-' + p.slot); if (h) h.textContent = p.label;
+    const th = document.getElementById('th-' + p.slot);       if (th) th.textContent = p.label;
+    const st = document.getElementById('subtab-' + p.slot);   if (st) st.textContent = '⚔ ' + p.label;
+  });
+}
 
 // ── Globale Map-ID → Route Mappings (Run-übergreifend) ──
 let _globalMap = { mapIdToRoute: {} };
@@ -1697,22 +1728,22 @@ function renderLive() {
   if (!statusEl || !teamEl || !boxEl || !empty) return;
 
   const _savedRoutes = {};
-  LIVE_PLAYERS.forEach(p => {
+  getPlayers().forEach(p => {
     const sel = document.getElementById('live-route-' + p.slot);
     if (sel && sel.value) _savedRoutes[p.slot] = sel.value;
   });
 
-  const anyData = LIVE_PLAYERS.some(p => data['autoTeam_' + p.slot]);
+  const anyData = getPlayers().some(p => data['autoTeam_' + p.slot]);
   empty.style.display = anyData ? 'none' : 'block';
 
   // ── Status-Zeile: pro Spieler 1 kompakte Karte mit Map + Alter ──
-  statusEl.innerHTML = LIVE_PLAYERS.map(p => {
+  statusEl.innerHTML = getPlayers().map(p => {
     const at = data['autoTeam_' + p.slot];
     if (!at) {
       return `
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;opacity:0.5;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;">${p.label}</div>
+            <div onclick="renamePlayer('${p.slot}')" title="Klick zum Umbenennen" style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;cursor:pointer;">${p.label} <span style="opacity:0.45;font-size:8px;">✎</span></div>
             <div style="font-size:10px;color:var(--muted);">offline</div>
           </div>
         </div>`;
@@ -1729,7 +1760,7 @@ function renderLive() {
     return `
       <div style="background:var(--surface);border:1px solid ${p.color}55;border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;gap:5px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;">${p.label}</div>
+          <div onclick="renamePlayer('${p.slot}')" title="Klick zum Umbenennen" style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;cursor:pointer;">${p.label} <span style="opacity:0.45;font-size:8px;">✎</span></div>
           <div style="font-size:10px;color:var(--muted);">${liveAgeLabel(at.updatedAt)}</div>
         </div>
         <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Map: <strong style="color:var(--text);">${mapDisplay}</strong></div>
@@ -1752,7 +1783,7 @@ function renderLive() {
   const teamRows = [];
   const boxRows  = [];
   (data.links || []).forEach((link, linkIdx) => {
-    const slots = LIVE_PLAYERS.map(p => {
+    const slots = getPlayers().map(p => {
       const pid = link[p.slot + '_pid'];
       const at = data['autoTeam_' + p.slot];
       let pokemon = null, location = null, slotIdx = -1;
@@ -1768,7 +1799,7 @@ function renderLive() {
     });
     const anyInTeam   = slots.some(s => s.location === 'team');
     const allInBox    = slots.every(s => s.location === 'box');
-    const isFullyDead = LIVE_PLAYERS.every(pp => link.dead && link.dead[pp.slot]);
+    const isFullyDead = getPlayers().every(pp => link.dead && link.dead[pp.slot]);
     const row = _renderSoullinkRow(link, linkIdx, slots, isFullyDead);
     if (anyInTeam) teamRows.push(row);
     else if (allInBox || isFullyDead) boxRows.push(row);
@@ -1783,7 +1814,7 @@ function renderLive() {
     : '<div style="text-align:center;color:var(--muted);font-size:12px;padding:18px 0;">Keine Links in Box</div>';
 
   // Dropdown-Auswahl wiederherstellen
-  LIVE_PLAYERS.forEach(p => {
+  getPlayers().forEach(p => {
     const saved = _savedRoutes[p.slot];
     if (!saved) return;
     const sel = document.getElementById('live-route-' + p.slot);
@@ -1878,7 +1909,7 @@ function _renderManualLinkBody() {
   // Route-Wert merken vor Rebuild (sonst geht das Dropdown beim Klick verloren)
   const prevRouteSel = (document.getElementById('manual-link-route') || {}).value || '';
 
-  const sections = LIVE_PLAYERS.map(p => {
+  const sections = getPlayers().map(p => {
     const at = data['autoTeam_' + p.slot];
     const team = (at && Array.isArray(at.team)) ? at.team : [];
     const box  = (at && Array.isArray(at.box))  ? at.box  : [];
@@ -1914,7 +1945,7 @@ function _renderManualLinkBody() {
     return `
       <div style="margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
-          <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;">${p.label}</div>
+          <div onclick="renamePlayer('${p.slot}')" title="Klick zum Umbenennen" style="font-family:'Press Start 2P',monospace;font-size:10px;color:${p.color};letter-spacing:1px;cursor:pointer;">${p.label} <span style="opacity:0.45;font-size:8px;">✎</span></div>
           <div style="font-size:11px;">${selLabel}</div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:5px;max-height:200px;overflow-y:auto;padding:6px;background:var(--surface2);border-radius:6px;border:1px solid var(--border);">
@@ -1923,7 +1954,7 @@ function _renderManualLinkBody() {
       </div>`;
   }).join('');
 
-  const allPicked = LIVE_PLAYERS.every(p => _manualLinkSel[p.slot]);
+  const allPicked = getPlayers().every(p => _manualLinkSel[p.slot]);
   const footer = `
     <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:6px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
@@ -1952,7 +1983,7 @@ function selectManualLink(player, source, idx) {
 }
 
 function confirmManualLink() {
-  if (!LIVE_PLAYERS.every(p => _manualLinkSel[p.slot])) return;
+  if (!getPlayers().every(p => _manualLinkSel[p.slot])) return;
 
   // Doppel-Check: existiert dieser Link (selbe PIDs) schon?
   const existsByPid = (data.links || []).some(link =>
@@ -2006,7 +2037,7 @@ function showLinkDetail(playerSlot, source, idx) {
   if (!at) return;
   const m = source === 'team' ? (at.team || [])[idx] : (at.box || [])[idx];
   if (!m) return;
-  const playerLabel = (LIVE_PLAYERS.find(p => p.slot === playerSlot) || {}).label || playerSlot;
+  const playerLabel = (getPlayers().find(p => p.slot === playerSlot) || {}).label || playerSlot;
   const slotLabel = source === 'team'
     ? `${playerLabel} · Team Slot ${idx + 1}`
     : `${playerLabel} · PC Box ${m.box ?? '?'}-${m.slot ?? idx + 1}`;
@@ -2443,7 +2474,7 @@ function setPiEnemyIdx(player, idx) {
 async function refreshPiEnemy() {
   if (!piMode || !piMode.startsWith('enemy_')) return;
   const player = piMode.slice('enemy_'.length);
-  const playerLabel = ((typeof LIVE_PLAYERS !== 'undefined' && LIVE_PLAYERS.find(p => p.slot === player)) || {}).label || player;
+  const playerLabel = ((typeof getPlayers() !== 'undefined' && getPlayers().find(p => p.slot === player)) || {}).label || player;
   const labelEl = document.getElementById('pi-enemy-player-label');
   if (labelEl) labelEl.textContent = playerLabel;
 
@@ -2489,7 +2520,7 @@ async function refreshPiEnemy() {
   if (slotsEl) {
     if (enemyTeam.length > 1) {
       slotsEl.style.display = 'flex';
-      const playerColor = ((LIVE_PLAYERS.find(p => p.slot === player)) || {}).color || 'var(--accent)';
+      const playerColor = ((getPlayers().find(p => p.slot === player)) || {}).color || 'var(--accent)';
       slotsEl.innerHTML = enemyTeam.map((m, i) => {
         const active = i === _piEnemyIdx[player];
         const revealed = _piEnemyRevealed[player].has(i);
