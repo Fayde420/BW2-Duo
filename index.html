@@ -1112,6 +1112,7 @@ function subscribeToRun() {
     } else {
       data = { links:[], encounters:[], routes:initRoutes(), gymState:{} };
     }
+    migratePlayerNamesToGlobal();
     // Update subtitle
     runsRef.once('value', snap => {
       const runs = snap.val() || {};
@@ -1280,6 +1281,9 @@ const GYMS = [
   { num:6, name:'Panaero City', leader:'Géraldine', type:'Flug', lvl:'39/37', badge:'Jetorden' },
   { num:7, name:'Twindrake City', leader:'Lysander', type:'Drache', lvl:'48/46', badge:'Legendenorden' },
   { num:8, name:'Abidaya City', leader:'Benson', type:'Wasser', lvl:'51/49', badge:'Wellenorden' },
+  // Endgame — keine Orden, daher eigene Überschrift statt "GYM N".
+  { num:9,  name:'Liga',     leader:'Top Vier', type:'', lvl:'58', badge:'', label:'LIGA' },
+  { num:10, name:'Champion', leader:'',         type:'', lvl:'59', badge:'', label:'CHAMPION' },
 ];
 
 // ── RENDER FUNCTIONS ──
@@ -1321,18 +1325,21 @@ function render() {
 // Die bestehende Subscription auf db.ref(currentRunId) zieht das
 // automatisch in `data` rein — wir rendern hier nur draus.
 // Feste Slots p1/p2 (= Bridge --player + DB-Knoten autoTeam_<slot>).
-// Anzeigenamen kommen PRO RUN aus data.players (Fallback = Standard) und sind
-// per Klick umbenennbar -> jeder Run kann andere Spieler haben.
+// Anzeigenamen liegen RUN-ÜBERGREIFEND unter /_global/players, damit sie beim
+// Anlegen eines neuen Runs erhalten bleiben. Ältere Runs haben die Namen noch
+// pro Run unter data.players — die gelten als Fallback (Reihenfolge:
+// _global → data.players → Standard).
 const PLAYER_DEFAULTS = {
   p1: { label: 'Spieler 1', color: '#4fc3f7' },
   p2: { label: 'Spieler 2', color: '#f06292' },
 };
 function getPlayers() {
-  const cfg = (typeof data !== 'undefined' && data && data.players) || {};
+  const gcfg = (typeof _globalMap !== 'undefined' && _globalMap && _globalMap.players) || {};
+  const rcfg = (typeof data !== 'undefined' && data && data.players) || {};
   return PLAYERS.map(slot => ({
     slot,
-    label: (cfg[slot] && cfg[slot].label) || PLAYER_DEFAULTS[slot].label,
-    color: (cfg[slot] && cfg[slot].color) || PLAYER_DEFAULTS[slot].color,
+    label: (gcfg[slot] && gcfg[slot].label) || (rcfg[slot] && rcfg[slot].label) || PLAYER_DEFAULTS[slot].label,
+    color: (gcfg[slot] && gcfg[slot].color) || (rcfg[slot] && rcfg[slot].color) || PLAYER_DEFAULTS[slot].color,
   }));
 }
 function renamePlayer(slot) {
@@ -1341,12 +1348,33 @@ function renamePlayer(slot) {
   if (name === null) return;
   const t = name.trim();
   if (!t) return;
-  const players = Object.assign({}, (typeof data !== 'undefined' && data && data.players) || {});
-  players[slot] = Object.assign({}, players[slot] || {}, { label: t });
-  if (typeof data !== 'undefined' && data) data.players = players;
-  db.ref(currentRunId).update({ players }).catch(() => {});
+  // Global speichern -> überlebt neue Runs.
+  if (!_globalMap.players) _globalMap.players = {};
+  _globalMap.players[slot] = Object.assign({}, _globalMap.players[slot] || {}, { label: t });
+  db.ref('_global/players/' + slot + '/label').set(t).catch(() => {});
   render();
 }
+// Einmal-Migration: Namen, die noch pro Run unter data.players liegen, nach
+// /_global/players hochziehen — sonst gingen sie beim nächsten neuen Run
+// verloren. Läuft nur, wenn global für den Slot noch nichts gesetzt ist.
+function migratePlayerNamesToGlobal() {
+  // Erst migrieren, wenn /_global wirklich geladen ist — sonst wuerde ein noch
+  // leeres _globalMap so aussehen, als gaebe es global keine Namen, und ein
+  // alter Run-Name koennte den globalen ueberschreiben.
+  if (!_globalLoaded) return;
+  const rcfg = (typeof data !== 'undefined' && data && data.players) || {};
+  if (typeof _globalMap === 'undefined' || !_globalMap) return;
+  if (!_globalMap.players) _globalMap.players = {};
+  PLAYERS.forEach(slot => {
+    const oldLabel = rcfg[slot] && rcfg[slot].label;
+    const hasGlobal = _globalMap.players[slot] && _globalMap.players[slot].label;
+    if (oldLabel && !hasGlobal) {
+      _globalMap.players[slot] = Object.assign({}, _globalMap.players[slot] || {}, { label: oldLabel });
+      db.ref('_global/players/' + slot + '/label').set(oldLabel).catch(() => {});
+    }
+  });
+}
+
 function applyPlayerLabels() {
   getPlayers().forEach(p => {
     const h = document.getElementById('hdr-label-' + p.slot); if (h) h.textContent = p.label;
@@ -1355,13 +1383,20 @@ function applyPlayerLabels() {
   });
 }
 
-// ── Globale Map-ID → Route Mappings (Run-übergreifend) ──
-let _globalMap = { mapIdToRoute: {} };
+// ── Globale Map-ID → Route Mappings + Spielernamen (Run-übergreifend) ──
+let _globalMap = { mapIdToRoute: {}, players: {} };
+let _globalLoaded = false;   // true, sobald /_global einmal geladen wurde
 db.ref('_global').on('value', snap => {
   const v = snap.val() || {};
   _globalMap = v;
   if (!_globalMap.mapIdToRoute) _globalMap.mapIdToRoute = {};
-  if (typeof render === 'function') renderLive();
+  if (!_globalMap.players) _globalMap.players = {};
+  _globalLoaded = true;
+  // Falls der Run-Listener zuerst da war: jetzt nachholen.
+  migratePlayerNamesToGlobal();
+  // Spielernamen stecken hier drin -> voll rendern (render() setzt auch die
+  // Header-/Tab-Labels), nicht nur die Live-Karten.
+  if (typeof render === 'function') render();
 });
 function getMapMappings() {
   return (_globalMap && _globalMap.mapIdToRoute) || {};
@@ -3168,11 +3203,11 @@ function renderGyms() {
   const state = data.gymState || {};
   grid.innerHTML = GYMS.map((g, i) => `
     <div class="gym-card">
-      <div class="gym-number">GYM ${g.num}</div>
+      <div class="gym-number">${g.label || ('GYM ' + g.num)}</div>
       <div class="gym-name">${g.name}</div>
-      <div class="gym-leader">${g.leader} · ${g.type}</div>
+      ${(g.leader || g.type) ? `<div class="gym-leader">${[g.leader, g.type].filter(Boolean).join(' · ')}</div>` : ''}
       <div class="gym-lvlcap">Lv. ${g.lvl}</div>
-      <div class="gym-badge">${g.badge}</div>
+      ${g.badge ? `<div class="gym-badge">${g.badge}</div>` : ''}
       <div class="gym-check">
         <input type="checkbox" id="gym-${i}" ${state[i]?'checked':''} onchange="toggleGym(${i})">
         <label for="gym-${i}">✓ Besiegt</label>
