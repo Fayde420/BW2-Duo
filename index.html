@@ -1032,11 +1032,14 @@ window.addEventListener('load', () => {
 
 <!-- ══════════════════════ RUN ÜBERSICHT MODAL ══════════════════════ -->
 <div id="run-overview-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:5000;align-items:center;justify-content:center;">
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:min(500px,90vw);max-height:80vh;overflow-y:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;">Run Übersicht</div>
-      <button onclick="hideRunOverview()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;">×</button>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:min(720px,94vw);max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+      <div style="font-family:'Press Start 2P',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;white-space:nowrap;">Run Übersicht</div>
+      <!-- Ordner-Leiste: rechts neben dem Titel, waagerecht scrollbar, Drop-Ziele -->
+      <div id="folder-bar" style="display:flex;gap:6px;flex:1;overflow-x:auto;padding:2px 0;"></div>
+      <button onclick="hideRunOverview()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;flex-shrink:0;">×</button>
     </div>
+    <div id="folder-settings"></div>
     <div id="run-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
     <div style="display:flex;gap:8px;">
       <input id="new-run-name" type="text" placeholder="Run-Name (z.B. Schwarz 2 Run 1)" 
@@ -1078,6 +1081,7 @@ function switchToRun(runId) {
   localStorage.setItem('duo_current_run', runId);
   dataRef = db.ref(currentRunId);
   subscribeToRun();
+  if (typeof applyPlayerLabels === 'function') applyPlayerLabels();
   hideRunOverview();
   // Aktiven Run global publishen: andere Frontends + Bridges folgen automatisch
   db.ref('_active_run').set(runId).catch(()=>{});
@@ -1113,13 +1117,8 @@ function subscribeToRun() {
       data = { links:[], encounters:[], routes:initRoutes(), gymState:{} };
     }
     migratePlayerNamesToGlobal();
-    // Update subtitle
-    runsRef.once('value', snap => {
-      const runs = snap.val() || {};
-      const run = runs[currentRunId];
-      const subtitle = document.getElementById('run-subtitle');
-      if (subtitle) subtitle.textContent = run ? run.name : ('Pokémon Schwarz 2 · ' + getPlayers().map(p => p.label).join(' · '));
-    });
+    // Untertitel + Spielernamen (aus dem Ordner des Runs) auffrischen
+    applyPlayerLabels();
     render();
     document.getElementById('loading-overlay').style.display = 'none';
   });
@@ -1129,7 +1128,9 @@ function createRun() {
   const name = document.getElementById('new-run-name').value.trim();
   if (!name) return;
   const runId = 'run_' + Date.now();
+  // Im gewählten Ordner anlegen -> der Run übernimmt dessen Spielernamen.
   const meta = { name, created: Date.now() };
+  if (_selectedFolder && _selectedFolder !== '__all__') meta.folder = _selectedFolder;
   runsRef.child(runId).set(meta);
   db.ref(runId).set({ links:[], encounters:[], routes:initRoutes(), gymState:{} });
   document.getElementById('new-run-name').value = '';
@@ -1139,35 +1140,211 @@ function createRun() {
 
 function showRunOverview() {
   document.getElementById('run-overview-modal').style.display = 'flex';
-  renderRunList();
+  renderFolderBar(); renderFolderSettings(); renderRunList();
 }
 function hideRunOverview() {
   document.getElementById('run-overview-modal').style.display = 'none';
 }
 
+// ══════════════════════════════════════════════════════════
+// ORDNER
+// Runs lassen sich in Ordner einsortieren (Drag & Drop auf die
+// Ordner-Leiste). Ein Ordner kann eigene Spielernamen festlegen —
+// jeder Run darin zeigt dann automatisch diese Namen.
+//   /__folders__/{id} = { name, created, players:{ slot:{label} } }
+//   /__runs__/{runId}/folder = <folderId|null>
+// ══════════════════════════════════════════════════════════
+const foldersRef = db.ref('__folders__');
+let _folders = {};
+let _runsMeta = {};
+// Filter-Zustand: '__all__' = alle Runs, null = Runs ohne Ordner, sonst Ordner-ID
+let _selectedFolder = '__all__';
+const _folderDragState = { runId: null };
+
+foldersRef.on('value', snap => {
+  _folders = snap.val() || {};
+  applyPlayerLabels();
+  renderFolderBar(); renderFolderSettings(); renderRunList();
+});
+runsRef.on('value', snap => {
+  _runsMeta = snap.val() || {};
+  applyPlayerLabels();
+  renderFolderBar(); renderRunList();
+});
+
+function currentFolderId() {
+  const m = _runsMeta[currentRunId];
+  return (m && m.folder) || null;
+}
+// Spielernamen des Ordners, in dem der AKTIVE Run liegt.
+function folderPlayerLabels() {
+  const f = _folders[currentFolderId()];
+  return (f && f.players) || {};
+}
+
+function createFolder() {
+  const name = prompt('Name des Ordners:');
+  if (name === null) return;
+  const t = name.trim();
+  if (!t) return;
+  const id = 'f_' + Date.now();
+  foldersRef.child(id).set({ name: t, created: Date.now() }).catch(()=>{});
+  _selectedFolder = id;
+}
+function selectFolder(id) {
+  _selectedFolder = id;
+  renderFolderBar(); renderFolderSettings(); renderRunList();
+}
+function renameFolder(id) {
+  const f = _folders[id]; if (!f) return;
+  const name = prompt('Neuer Ordnername:', f.name || '');
+  if (name === null) return;
+  const t = name.trim(); if (!t) return;
+  foldersRef.child(id).update({ name: t }).catch(()=>{});
+}
+function deleteFolder(id) {
+  const f = _folders[id]; if (!f) return;
+  const inside = Object.entries(_runsMeta).filter(([, m]) => m && m.folder === id);
+  if (!confirm(`Ordner "${f.name}" löschen?${inside.length ? `\n\nDie ${inside.length} Run(s) darin bleiben erhalten und liegen danach wieder ohne Ordner.` : ''}`)) return;
+  const upd = {};
+  inside.forEach(([rid]) => { upd[`${rid}/folder`] = null; });
+  if (Object.keys(upd).length) runsRef.update(upd).catch(()=>{});
+  foldersRef.child(id).remove().catch(()=>{});
+  if (_selectedFolder === id) _selectedFolder = null;
+}
+// Spielernamen eines Ordners setzen (leer = Standardname).
+function setFolderPlayer(folderId, slot, value) {
+  const t = (value || '').trim();
+  foldersRef.child(folderId).child('players').child(slot).child('label')
+    .set(t || null).catch(()=>{});
+}
+
+// ── Drag & Drop: Run auf einen Ordner ziehen ──
+function onRunDragStart(ev, runId) {
+  _folderDragState.runId = runId;
+  try { ev.dataTransfer.setData('text/plain', runId); } catch (e) {}
+  ev.dataTransfer.effectAllowed = 'move';
+}
+function onFolderDragOver(ev, el) {
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  if (el) { el.style.borderColor = 'var(--accent)'; el.style.background = 'rgba(79,195,247,0.15)'; }
+}
+function onFolderDragLeave(ev, el) {
+  if (el) { el.style.borderColor = ''; el.style.background = ''; }
+  renderFolderBar();
+}
+function onFolderDrop(ev, folderId, el) {
+  ev.preventDefault();
+  let runId = '';
+  try { runId = ev.dataTransfer.getData('text/plain'); } catch (e) {}
+  runId = runId || _folderDragState.runId;
+  _folderDragState.runId = null;
+  if (el) { el.style.borderColor = ''; el.style.background = ''; }
+  if (!runId || !_runsMeta[runId]) { renderFolderBar(); return; }
+  runsRef.child(runId).update({ folder: folderId }).catch(()=>{});
+}
+
+function renderFolderBar() {
+  const bar = document.getElementById('folder-bar');
+  if (!bar) return;
+  const countIn = id => id === '__all__'
+    ? Object.keys(_runsMeta).length
+    : Object.values(_runsMeta).filter(m => m && (m.folder || null) === id).length;
+  // id: '__all__' (alle) | null (ohne Ordner) | Ordner-ID. "Alle" ist kein Drop-Ziel.
+  const chip = (id, label, icon) => {
+    const active = _selectedFolder === id;
+    const isDrop = id !== '__all__';
+    const arg = id === '__all__' ? `'__all__'` : (id === null ? 'null' : `'${id}'`);
+    return `
+      <div onclick="selectFolder(${arg})"
+        ${isDrop ? `ondragover="onFolderDragOver(event,this)" ondragleave="onFolderDragLeave(event,this)" ondrop="onFolderDrop(event,${id === null ? 'null' : `'${id}'`},this)"` : ''}
+        title="${isDrop ? 'Klicken zum Filtern · Run hierher ziehen' : 'Alle Runs zeigen'}"
+        style="display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;user-select:none;
+               border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};
+               background:${active ? 'rgba(79,195,247,0.12)' : 'var(--surface2)'};
+               color:${active ? 'var(--accent)' : 'var(--text)'};
+               padding:5px 10px;border-radius:999px;font-size:12px;transition:border-color .15s,background .15s;">
+        <span>${icon}</span><span>${label}</span>
+        <span style="color:var(--muted);font-size:10px;">${countIn(id)}</span>
+      </div>`;
+  };
+  const folderChips = Object.entries(_folders)
+    .sort((a,b) => (a[1].created||0)-(b[1].created||0))
+    .map(([id, f]) => chip(id, f.name || 'Ordner', '📁')).join('');
+  bar.innerHTML =
+    chip('__all__', 'Alle', '🗂') +
+    chip(null, 'Ohne Ordner', '📄') +
+    folderChips +
+    `<div onclick="createFolder()" title="Neuen Ordner anlegen"
+       style="white-space:nowrap;cursor:pointer;user-select:none;border:1px dashed var(--border);
+              color:var(--muted);padding:5px 10px;border-radius:999px;font-size:12px;">+ Ordner</div>`;
+}
+
+// Panel unter der Leiste: Ordner umbenennen/löschen + Spielernamen
+function renderFolderSettings() {
+  const box = document.getElementById('folder-settings');
+  if (!box) return;
+  const f = _selectedFolder && _folders[_selectedFolder];
+  if (!f) { box.innerHTML = ''; return; }
+  const fp = f.players || {};
+  const inputs = PLAYERS.map(slot => {
+    const d = PLAYER_DEFAULTS[slot];
+    return `
+      <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:120px;">
+        <label style="font-size:10px;color:var(--muted);">${d.label}</label>
+        <input type="text" value="${((fp[slot] && fp[slot].label) || '').replace(/"/g,'&quot;')}"
+          placeholder="${d.label}"
+          onchange="setFolderPlayer('${_selectedFolder}','${slot}',this.value)"
+          style="background:var(--surface2);border:1px solid ${d.color}55;color:var(--text);padding:6px 9px;border-radius:4px;font-family:'Exo 2',sans-serif;font-size:12px;width:100%;">
+      </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px;background:var(--surface2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:13px;">📁 ${f.name || 'Ordner'}</div>
+        <div style="display:flex;gap:6px;">
+          <button onclick="renameFolder('${_selectedFolder}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;" title="Ordner umbenennen">✏️</button>
+          <button onclick="deleteFolder('${_selectedFolder}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;" title="Ordner löschen">🗑</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">
+        Spielernamen für alle Runs in diesem Ordner (leer = Standard):
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${inputs}</div>
+    </div>`;
+}
+
 function renderRunList() {
-  runsRef.once('value', snap => {
-    const runs = snap.val() || {};
-    const list = document.getElementById('run-list');
-    const entries = Object.entries(runs).sort((a,b) => (b[1].created||0)-(a[1].created||0));
-    if (entries.length === 0) {
-      list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">Noch keine Runs. Erstelle deinen ersten!</div>';
-      return;
-    }
-    list.innerHTML = entries.map(([id, meta]) => `
-      <div class="run-item ${id===currentRunId?'active-run':''}" onclick="switchToRun('${id}')">
+  const list = document.getElementById('run-list');
+  if (!list) return;
+  const all = Object.entries(_runsMeta);
+  const entries = (_selectedFolder === '__all__'
+      ? all
+      : all.filter(([, m]) => ((m && m.folder) || null) === _selectedFolder)
+    ).sort((a,b) => (b[1].created||0)-(a[1].created||0));
+  if (entries.length === 0) {
+    list.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">${
+      all.length === 0 ? 'Noch keine Runs. Erstelle deinen ersten!' : 'Keine Runs in dieser Ansicht.'}</div>`;
+    return;
+  }
+  list.innerHTML = entries.map(([id, meta]) => {
+    const fid = (meta && meta.folder) || null;
+    const fname = fid && _folders[fid] ? _folders[fid].name : null;
+    return `
+      <div class="run-item ${id===currentRunId?'active-run':''}" onclick="switchToRun('${id}')"
+        draggable="true" ondragstart="onRunDragStart(event,'${id}')" title="Zum Wechseln klicken · zum Einsortieren auf einen Ordner ziehen">
         <div>
-          <div class="run-item-name">${meta.name}</div>
-          <div class="run-item-meta">${meta.created ? new Date(meta.created).toLocaleDateString('de-DE') : ''}</div>
+          <div class="run-item-name">⠿ ${meta.name}</div>
+          <div class="run-item-meta">${meta.created ? new Date(meta.created).toLocaleDateString('de-DE') : ''}${fname ? ` · 📁 ${fname}` : ''}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           ${id===currentRunId ? '<span style="font-size:10px;color:var(--accent);font-family:\'Press Start 2P\',monospace;">AKTIV</span>' : ''}
-          <button onclick="event.stopPropagation();renameRun('${id}','${meta.name.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:0 4px;" title="Umbenennen">✏️</button>
+          <button onclick="event.stopPropagation();renameRun('${id}','${(meta.name||'').replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:0 4px;" title="Umbenennen">✏️</button>
           <button onclick="event.stopPropagation();deleteRun('${id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;" title="Löschen">🗑</button>
         </div>
-      </div>
-    `).join('');
-  });
+      </div>`;
+  }).join('');
 }
 
 function deleteRun(runId) {
@@ -1334,12 +1511,14 @@ const PLAYER_DEFAULTS = {
   p1: { label: 'Spieler 1', color: '#4fc3f7' },
   p2: { label: 'Spieler 2', color: '#f06292' },
 };
+// Reihenfolge: Ordner des Runs → global → alter Run-Wert → Standard.
 function getPlayers() {
+  const fcfg = (typeof folderPlayerLabels === 'function' && folderPlayerLabels()) || {};
   const gcfg = (typeof _globalMap !== 'undefined' && _globalMap && _globalMap.players) || {};
   const rcfg = (typeof data !== 'undefined' && data && data.players) || {};
   return PLAYERS.map(slot => ({
     slot,
-    label: (gcfg[slot] && gcfg[slot].label) || (rcfg[slot] && rcfg[slot].label) || PLAYER_DEFAULTS[slot].label,
+    label: (fcfg[slot] && fcfg[slot].label) || (gcfg[slot] && gcfg[slot].label) || (rcfg[slot] && rcfg[slot].label) || PLAYER_DEFAULTS[slot].label,
     color: (gcfg[slot] && gcfg[slot].color) || (rcfg[slot] && rcfg[slot].color) || PLAYER_DEFAULTS[slot].color,
   }));
 }
@@ -1349,10 +1528,16 @@ function renamePlayer(slot) {
   if (name === null) return;
   const t = name.trim();
   if (!t) return;
-  // Global speichern -> überlebt neue Runs.
-  if (!_globalMap.players) _globalMap.players = {};
-  _globalMap.players[slot] = Object.assign({}, _globalMap.players[slot] || {}, { label: t });
-  db.ref('_global/players/' + slot + '/label').set(t).catch(() => {});
+  // Liegt der Run in einem Ordner -> dort speichern (gilt für alle Runs des
+  // Ordners). Sonst global, damit der Name neue Runs überlebt.
+  const fid = (typeof currentFolderId === 'function') ? currentFolderId() : null;
+  if (fid) {
+    setFolderPlayer(fid, slot, t);
+  } else {
+    if (!_globalMap.players) _globalMap.players = {};
+    _globalMap.players[slot] = Object.assign({}, _globalMap.players[slot] || {}, { label: t });
+    db.ref('_global/players/' + slot + '/label').set(t).catch(() => {});
+  }
   render();
 }
 // Einmal-Migration: Namen, die noch pro Run unter data.players liegen, nach
@@ -1377,11 +1562,20 @@ function migratePlayerNamesToGlobal() {
 }
 
 function applyPlayerLabels() {
-  getPlayers().forEach(p => {
+  const players = getPlayers();
+  players.forEach(p => {
     const h = document.getElementById('hdr-label-' + p.slot); if (h) h.textContent = p.label;
     const th = document.getElementById('th-' + p.slot);       if (th) th.textContent = p.label;
     const st = document.getElementById('subtab-' + p.slot);   if (st) st.textContent = '⚔ ' + p.label;
   });
+  // Untertitel: Run-Name, sonst die (ggf. vom Ordner kommenden) Spielernamen.
+  const sub = document.getElementById('run-subtitle');
+  const meta = (typeof _runsMeta !== 'undefined' && _runsMeta) ? _runsMeta[currentRunId] : null;
+  if (sub) {
+    sub.textContent = meta && meta.name
+      ? meta.name
+      : 'Pokémon Schwarz 2 · ' + players.map(p => p.label).join(' · ');
+  }
 }
 
 // ── Globale Map-ID → Route Mappings + Spielernamen (Run-übergreifend) ──
