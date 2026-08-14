@@ -67,10 +67,13 @@ def push(state_text: str, player: str, force_run: str | None) -> None:
         fetch_active_run()
     run_id = force_run or _current_run_id
 
+    # Server-Zeitstempel mitschicken: 'updatedAt' aus der Lua ist die Uhr
+    # DIESES PCs. Geht sie falsch, zeigt die Website faelschlich "offline".
+    # {".sv":"timestamp"} laesst Firebase die Zeit selbst setzen.
+    d["serverAt"] = {".sv": "timestamp"}
+    payload = json.dumps(d).encode("utf-8")
     url = f"{FIREBASE_URL}/{run_id}/autoTeam_{player}.json"
-    req = urllib.request.Request(
-        url, data=state_text.encode("utf-8"), method="PUT"
-    )
+    req = urllib.request.Request(url, data=payload, method="PUT")
     req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=5) as res:
